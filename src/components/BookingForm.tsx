@@ -15,13 +15,15 @@ import {
 
 interface BookingFormProps {
   selectedSlot: BookingSlot | null;
+  utmSource?: string;
+  utmCampaign?: string;
 }
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE_MB = 10;
 const ACCEPT_TYPES = "image/*,video/*";
 
-export default function BookingForm({ selectedSlot }: BookingFormProps) {
+export default function BookingForm({ selectedSlot, utmSource, utmCampaign }: BookingFormProps) {
   const [formData, setFormData] = useState<BookingFormData>({
     full_name: "",
     phone_number: "",
@@ -38,15 +40,16 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
 
   const phoneValid = /^08\d{8,12}$/.test(formData.phone_number);
   const emailValid =
-    !formData.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email);
+    formData.email.trim() !== "" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email);
 
   const canSubmit =
     selectedSlot &&
     formData.full_name.trim() &&
     formData.phone_number.trim() &&
     phoneValid &&
-    formData.problem.trim() &&
+    formData.email.trim() &&
     emailValid &&
+    formData.problem.trim() &&
     !loading;
 
   const handleChange = (
@@ -98,6 +101,9 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
       mediaFiles.forEach((file) => {
         formDataToSend.append("media", file);
       });
+
+      if (utmSource) formDataToSend.append("utm_source", utmSource);
+      if (utmCampaign) formDataToSend.append("utm_campaign", utmCampaign);
 
       const res = await fetch("/api/bookings", {
         method: "POST",
@@ -243,6 +249,7 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
             type="email"
             id="email"
             name="email"
+            required
             value={formData.email}
             onChange={handleChange}
             className={`w-full rounded-lg border bg-white py-3 pl-10 pr-4 text-sm text-foreground outline-none transition-all placeholder:text-gray-300 focus:ring-1 ${

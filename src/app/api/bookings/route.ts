@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase, supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { createCalendarEvent } from "@/lib/google-calendar";
+import { sendBookingConfirmation } from "@/lib/email";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
@@ -85,6 +86,8 @@ export async function POST(request: NextRequest) {
         phone_number: formData.get("phone_number")?.toString()?.trim() ?? "",
         email: formData.get("email")?.toString()?.trim() ?? "",
         problem: formData.get("problem")?.toString()?.trim() ?? "",
+        utm_source: formData.get("utm_source")?.toString()?.trim() ?? "",
+        utm_campaign: formData.get("utm_campaign")?.toString()?.trim() ?? "",
       };
       const media = formData.getAll("media");
       mediaFiles = media.filter((f): f is File => f instanceof File);
@@ -128,6 +131,14 @@ export async function POST(request: NextRequest) {
     }
 
     const email = typeof form.email === "string" ? form.email.trim() : "";
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json(
+        { error: "Email harus diisi dengan format yang valid." },
+        { status: 400 }
+      );
+    }
+    const utmSource = typeof form.utm_source === "string" ? form.utm_source : "";
+    const utmCampaign = typeof form.utm_campaign === "string" ? form.utm_campaign : "";
 
     if (!supabase) {
       return NextResponse.json(
@@ -167,6 +178,8 @@ export async function POST(request: NextRequest) {
           media_urls: mediaUrls,
         },
         status: "PENDING",
+        utm_source: utmSource || null,
+        utm_campaign: utmCampaign || null,
       })
       .select("id")
       .single();
@@ -232,6 +245,16 @@ export async function POST(request: NextRequest) {
     } catch (calError) {
       console.error("Google Calendar error (booking still saved):", calError);
     }
+
+    // Send booking confirmation email (non-blocking)
+    sendBookingConfirmation({
+      fullName: form.full_name as string,
+      email,
+      bookingSlot: slot.datetime,
+      problem: form.problem as string,
+    }).catch((err) =>
+      console.error("Booking confirmation email error:", err)
+    );
 
     return NextResponse.json({
       success: true,

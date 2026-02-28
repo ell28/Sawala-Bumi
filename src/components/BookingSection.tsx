@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import SlotPicker from "./SlotPicker";
 import BookingForm from "./BookingForm";
 import { BookingSlot } from "@/lib/types";
 
-export default function BookingSection() {
+function BookingSectionInner() {
+  const searchParams = useSearchParams();
+  const utmSource = searchParams.get("utm_source") || "";
+  const utmCampaign = searchParams.get("utm_campaign") || "";
+
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
 
   return (
@@ -59,10 +64,18 @@ export default function BookingSection() {
             />
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-6 sm:p-8">
-            <BookingForm selectedSlot={selectedSlot} />
+            <BookingForm selectedSlot={selectedSlot} utmSource={utmSource} utmCampaign={utmCampaign} />
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+export default function BookingSection() {
+  return (
+    <Suspense>
+      <BookingSectionInner />
+    </Suspense>
   );
 }

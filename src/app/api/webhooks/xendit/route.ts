@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sendPaymentSuccess } from "@/lib/email";
 
 const WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN;
 
@@ -74,6 +75,27 @@ export async function POST(request: NextRequest) {
   if (error) {
     console.error("Xendit webhook: Update booking error", error);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  }
+
+  // Send payment success email (non-blocking)
+  try {
+    const { data: booking } = await supabaseAdmin
+      .from("bookings")
+      .select("full_name, email, booking_slot")
+      .eq("id", bookingId)
+      .single();
+
+    if (booking?.email) {
+      sendPaymentSuccess({
+        fullName: booking.full_name,
+        email: booking.email,
+        bookingSlot: booking.booking_slot,
+      }).catch((err) =>
+        console.error("Payment success email error:", err)
+      );
+    }
+  } catch (emailErr) {
+    console.error("Failed to query booking for email:", emailErr);
   }
 
   return NextResponse.json({ received: true });

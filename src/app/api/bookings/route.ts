@@ -198,9 +198,15 @@ export async function POST(request: NextRequest) {
             email: email || undefined,
           }),
         });
-        const qrResult = await res.json();
-        if (qrResult.qrString) {
-          qrString = qrResult.qrString;
+    const qrResult = await res.json();
+        // Hanya pakai qrString jika dari Xendit dan mirip payload QRIS (panjang, ada angka)
+        const raw = qrResult.qrString;
+        const isValidQRIS =
+          typeof raw === "string" &&
+          raw.length >= 50 &&
+          /\d/.test(raw);
+        if (isValidQRIS) {
+          qrString = raw;
         }
       } catch (qrError) {
         console.error("Xendit QR error (booking still saved):", qrError);

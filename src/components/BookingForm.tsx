@@ -111,7 +111,14 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         return;
       }
 
-      setQrString(data.qrString || null);
+      setQrString(
+        data.qrString &&
+          typeof data.qrString === "string" &&
+          data.qrString.length >= 50 &&
+          /\d/.test(data.qrString)
+          ? data.qrString
+          : null
+      );
       setSuccess(true);
     } catch {
       setError("Gagal menghubungi server. Silakan coba lagi.");

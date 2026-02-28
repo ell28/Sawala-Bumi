@@ -4,10 +4,24 @@ import { supabaseAdmin } from "@/lib/supabase";
 const WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN;
 
 export async function POST(request: NextRequest) {
-  const callbackToken = request.headers.get("x-callback-token");
+  // Xendit sends token in x-callback-token. Some proxies/gateways forward it as Authorization.
+  const callbackToken =
+    request.headers.get("x-callback-token") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
-  if (!WEBHOOK_TOKEN || callbackToken !== WEBHOOK_TOKEN) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!WEBHOOK_TOKEN) {
+    console.error("Xendit webhook: XENDIT_WEBHOOK_TOKEN not set");
+    return NextResponse.json(
+      { code: 500, message: "Webhook not configured" },
+      { status: 500 }
+    );
+  }
+
+  if (!callbackToken || callbackToken !== WEBHOOK_TOKEN) {
+    return NextResponse.json(
+      { code: 401, message: "Invalid or missing callback token" },
+      { status: 401 }
+    );
   }
 
   let body: {

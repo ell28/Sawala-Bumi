@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase, supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
 import { createCalendarEvent } from "@/lib/google-calendar";
-import { createInvoice } from "@/lib/xendit";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
@@ -180,28 +179,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Xendit invoice (create payment link)
-    let invoiceUrl: string | null = null;
-    try {
-      const invoiceResult = await createInvoice({
-        bookingId: data.id,
-        fullName: form.full_name,
-        phoneNumber: form.phone_number,
-        email: email || undefined,
-      });
-
-      if (invoiceResult) {
-        await supabase
-          .from("bookings")
-          .update({
-            xendit_invoice_id: invoiceResult.invoiceId,
-            xendit_invoice_url: invoiceResult.invoiceUrl,
-          })
-          .eq("id", data.id);
-        invoiceUrl = invoiceResult.invoiceUrl;
+    // Xendit QRIS via Supabase Edge Function (create QR code)
+    let qrString: string | null = null;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (supabaseUrl && serviceRoleKey) {
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/create-xendit-invoice`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify({
+            bookingId: data.id,
+            fullName: form.full_name,
+            phoneNumber: form.phone_number,
+            email: email || undefined,
+          }),
+        });
+        const qrResult = await res.json();
+        if (qrResult.qrString) {
+          qrString = qrResult.qrString;
+        }
+      } catch (qrError) {
+        console.error("Xendit QR error (booking still saved):", qrError);
       }
-    } catch (invError) {
-      console.error("Xendit invoice error (booking still saved):", invError);
     }
 
     // Google Calendar event (non-blocking)
@@ -227,8 +230,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       bookingId: data.id,
-      invoiceUrl,
-      message: "Booking berhasil dibuat. Menunggu pembayaran.",
+      qrString,
+      message: "Booking berhasil dibuat. Scan QR untuk pembayaran.",
     });
   } catch {
     return NextResponse.json(

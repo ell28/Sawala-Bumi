@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { BookingFormData, BookingSlot } from "@/lib/types";
 import {
   UserIcon,
@@ -31,7 +32,7 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  const [qrString, setQrString] = useState<string | null>(null);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,7 +111,7 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         return;
       }
 
-      setInvoiceUrl(data.invoiceUrl || null);
+      setQrString(data.qrString || null);
       setSuccess(true);
     } catch {
       setError("Gagal menghubungi server. Silakan coba lagi.");
@@ -127,10 +128,10 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
           Booking Berhasil
         </h3>
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted">
-          {invoiceUrl
-            ? "Klik tombol di bawah untuk menyelesaikan pembayaran Rp 750.000."
+          {qrString
+            ? "Scan QR code di bawah dengan aplikasi e-wallet atau mobile banking untuk membayar Rp 750.000."
             : "Kami akan mengirimkan detail pembayaran via WhatsApp ke "}
-          {!invoiceUrl && (
+          {!qrString && (
             <span className="font-medium text-foreground">
               {formData.phone_number}
             </span>
@@ -139,15 +140,13 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-secondary px-5 py-2.5 text-sm font-medium text-foreground">
           {selectedSlot?.label}, {selectedSlot?.time} WIB
         </div>
-        {invoiceUrl && (
-          <a
-            href={invoiceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-6 w-full rounded-full bg-foreground py-3.5 text-center text-sm font-medium text-white transition-all hover:bg-primary-light hover:shadow-lg"
-          >
-            Bayar Sekarang
-          </a>
+        {qrString && (
+          <div className="mt-6 flex flex-col items-center gap-3 rounded-xl border border-gray-200 bg-white p-6">
+            <QRCodeSVG value={qrString} size={220} level="M" />
+            <p className="text-xs text-muted">
+              Scan dengan OVO, GoPay, DANA, atau mobile banking
+            </p>
+          </div>
         )}
       </div>
     );

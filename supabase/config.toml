@@ -1,0 +1,6 @@
+# Supabase project config
+# Run: supabase secrets set XENDIT_SECRET_KEY=xxx
+# Run: supabase secrets set APP_URL=https://yourdomain.com
+
+[functions.create-xendit-invoice]
+verify_jwt = true  # Requires Authorization: Bearer <service_role_key> from Next.js API

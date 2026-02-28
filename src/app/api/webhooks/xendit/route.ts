@@ -11,10 +11,13 @@ export async function POST(request: NextRequest) {
   }
 
   let body: {
+    event?: string;
     id?: string;
     external_id?: string;
     status?: string;
     paid_at?: string;
+    created?: string;
+    qr_code?: { external_id?: string };
   };
 
   try {
@@ -23,11 +26,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (body.status !== "PAID") {
+  // QRIS callback: event "qr.payment", status "COMPLETED", external_id in qr_code
+  // Invoice callback: status "PAID", external_id at root
+  const isQrPaid = body.event === "qr.payment" && body.status === "COMPLETED";
+  const isInvoicePaid = body.status === "PAID";
+
+  if (!isQrPaid && !isInvoicePaid) {
     return NextResponse.json({ received: true });
   }
 
-  const externalId = body.external_id;
+  const externalId = body.qr_code?.external_id ?? body.external_id;
   if (!externalId || !externalId.startsWith("booking-")) {
     return NextResponse.json({ received: true });
   }
@@ -39,11 +47,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 
+  const paidAt = body.paid_at ?? body.created;
   const { error } = await supabaseAdmin
     .from("bookings")
     .update({
       status: "PAID",
-      paid_at: body.paid_at ? new Date(body.paid_at).toISOString() : new Date().toISOString(),
+      paid_at: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
     })
     .eq("id", bookingId)
     .in("status", ["PENDING"]);

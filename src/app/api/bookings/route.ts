@@ -1,5 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin, STORAGE_BUCKET } from "@/lib/supabase";
+import { createCalendarEvent } from "@/lib/google-calendar";
+import { createInvoice } from "@/lib/xendit";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILES = 5;
+
+async function uploadMediaFiles(files: File[]): Promise<string[]> {
+  if (!supabaseAdmin || files.length === 0) return [];
+
+  const urls: string[] = [];
+
+  for (let i = 0; i < Math.min(files.length, MAX_FILES); i++) {
+    const file = files[i];
+    if (file.size > MAX_FILE_SIZE) continue;
+
+    const ext = file.name.split(".").pop() || "bin";
+    const path = `${Date.now()}-${i}.${ext}`;
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const { error } = await supabaseAdmin.storage
+      .from(STORAGE_BUCKET)
+      .upload(path, buffer, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error("Storage upload error:", error);
+      continue;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabaseAdmin.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+    urls.push(publicUrl);
+  }
+
+  return urls;
+}
 
 export async function GET() {
   if (!supabase) {
@@ -26,8 +66,34 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { slot, form } = body;
+    const contentType = request.headers.get("content-type") || "";
+    let slot: { datetime?: string } | null = null;
+    let form: Record<string, unknown> = {};
+    let mediaFiles: File[] = [];
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const slotStr = formData.get("slot");
+      if (typeof slotStr === "string") {
+        try {
+          slot = JSON.parse(slotStr) as { datetime?: string };
+        } catch {
+          slot = null;
+        }
+      }
+      form = {
+        full_name: formData.get("full_name")?.toString()?.trim() ?? "",
+        phone_number: formData.get("phone_number")?.toString()?.trim() ?? "",
+        email: formData.get("email")?.toString()?.trim() ?? "",
+        problem: formData.get("problem")?.toString()?.trim() ?? "",
+      };
+      const media = formData.getAll("media");
+      mediaFiles = media.filter((f): f is File => f instanceof File);
+    } else {
+      const body = await request.json();
+      slot = body.slot ?? null;
+      form = body.form ?? {};
+    }
 
     // Server-side validation
     if (!slot?.datetime) {
@@ -37,26 +103,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!form?.full_name?.trim()) {
+    if (!form.full_name || typeof form.full_name !== "string") {
       return NextResponse.json(
-        { error: "Nama lengkap harus diisi." },
+        { error: "Nama harus diisi." },
         { status: 400 }
       );
     }
 
-    if (!form?.phone_number?.trim() || !/^08\d{8,12}$/.test(form.phone_number)) {
+    if (
+      !form.phone_number ||
+      typeof form.phone_number !== "string" ||
+      !/^08\d{8,12}$/.test(form.phone_number)
+    ) {
       return NextResponse.json(
-        { error: "Nomor WhatsApp tidak valid." },
+        { error: "Nomor Telp/WA tidak valid." },
         { status: 400 }
       );
     }
 
-    if (!form?.location?.trim()) {
+    if (!form.problem || typeof form.problem !== "string") {
       return NextResponse.json(
-        { error: "Lokasi proyek harus diisi." },
+        { error: "Problem harus diisi." },
         { status: 400 }
       );
     }
+
+    const email = typeof form.email === "string" ? form.email.trim() : "";
 
     if (!supabase) {
       return NextResponse.json(
@@ -80,18 +152,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Upload media files
+    const mediaUrls = await uploadMediaFiles(mediaFiles);
+
     // Insert booking
     const { data, error } = await supabase
       .from("bookings")
       .insert({
-        full_name: form.full_name.trim(),
-        phone_number: form.phone_number.trim(),
+        full_name: form.full_name,
+        phone_number: form.phone_number,
+        email: email || null,
         booking_slot: slot.datetime,
         questionnaire_data: {
-          project_type: form.project_type,
-          location: form.location,
-          budget_range: form.budget_range,
-          description: form.description,
+          problem: form.problem,
+          media_urls: mediaUrls,
         },
         status: "PENDING",
       })
@@ -106,12 +180,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // TODO: Create Xendit invoice
-    // const invoice = await xendit.createInvoice({ ... });
+    // Xendit invoice (create payment link)
+    let invoiceUrl: string | null = null;
+    try {
+      const invoiceResult = await createInvoice({
+        bookingId: data.id,
+        fullName: form.full_name,
+        phoneNumber: form.phone_number,
+        email: email || undefined,
+      });
+
+      if (invoiceResult) {
+        await supabase
+          .from("bookings")
+          .update({
+            xendit_invoice_id: invoiceResult.invoiceId,
+            xendit_invoice_url: invoiceResult.invoiceUrl,
+          })
+          .eq("id", data.id);
+        invoiceUrl = invoiceResult.invoiceUrl;
+      }
+    } catch (invError) {
+      console.error("Xendit invoice error (booking still saved):", invError);
+    }
+
+    // Google Calendar event (non-blocking)
+    try {
+      const calendarResult = await createCalendarEvent({
+        clientName: form.full_name,
+        bookingSlot: slot.datetime,
+        email,
+        problem: form.problem,
+        phoneNumber: form.phone_number,
+      });
+
+      if (calendarResult.eventId) {
+        await supabase
+          .from("bookings")
+          .update({ google_event_id: calendarResult.eventId })
+          .eq("id", data.id);
+      }
+    } catch (calError) {
+      console.error("Google Calendar error (booking still saved):", calError);
+    }
 
     return NextResponse.json({
       success: true,
       bookingId: data.id,
+      invoiceUrl,
       message: "Booking berhasil dibuat. Menunggu pembayaran.",
     });
   } catch {

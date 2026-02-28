@@ -8,10 +8,9 @@ export interface BookingSlot {
 export interface BookingFormData {
   full_name: string;
   phone_number: string;
-  project_type: "Rumah Baru" | "Renovasi" | "Interior";
-  location: string;
-  budget_range: "<200jt" | "200-500jt" | "500jt-1M" | ">1M";
-  description: string;
+  email: string;
+  problem: string;
+  media_urls: string[];
 }
 
 export interface BookingRequest {

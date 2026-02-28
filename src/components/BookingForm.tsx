@@ -1,14 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { BookingFormData, BookingSlot } from "@/lib/types";
 import {
   UserIcon,
   PhoneIcon,
-  BriefcaseIcon,
-  MapPinIcon,
-  BanknotesIcon,
+  EnvelopeIcon,
   DocumentIcon,
+  CameraIcon,
   CheckCircleIcon,
   SpinnerIcon,
 } from "./Icons";
@@ -17,30 +16,36 @@ interface BookingFormProps {
   selectedSlot: BookingSlot | null;
 }
 
-const PROJECT_TYPES = ["Rumah Baru", "Renovasi", "Interior"] as const;
-const BUDGET_RANGES = ["<200jt", "200-500jt", "500jt-1M", ">1M"] as const;
+const MAX_FILES = 5;
+const MAX_FILE_SIZE_MB = 10;
+const ACCEPT_TYPES = "image/*,video/*";
 
 export default function BookingForm({ selectedSlot }: BookingFormProps) {
   const [formData, setFormData] = useState<BookingFormData>({
     full_name: "",
     phone_number: "",
-    project_type: "Rumah Baru",
-    location: "",
-    budget_range: "<200jt",
-    description: "",
+    email: "",
+    problem: "",
+    media_urls: [],
   });
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phoneValid = /^08\d{8,12}$/.test(formData.phone_number);
+  const emailValid =
+    !formData.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email);
 
   const canSubmit =
     selectedSlot &&
     formData.full_name.trim() &&
     formData.phone_number.trim() &&
     phoneValid &&
-    formData.location.trim() &&
+    formData.problem.trim() &&
+    emailValid &&
     !loading;
 
   const handleChange = (
@@ -52,18 +57,50 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const valid: File[] = [];
+    const maxBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+    for (const file of files) {
+      if (file.size > maxBytes) continue;
+      if (valid.length >= MAX_FILES) break;
+      valid.push(file);
+    }
+
+    setMediaFiles((prev) => {
+      const combined = [...prev, ...valid].slice(0, MAX_FILES);
+      return combined;
+    });
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setMediaFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || !selectedSlot) return;
 
     setLoading(true);
     setError("");
 
     try {
+      const formDataToSend = new FormData();
+      formDataToSend.append("slot", JSON.stringify(selectedSlot));
+      formDataToSend.append("full_name", formData.full_name.trim());
+      formDataToSend.append("phone_number", formData.phone_number.trim());
+      formDataToSend.append("email", formData.email.trim());
+      formDataToSend.append("problem", formData.problem.trim());
+
+      mediaFiles.forEach((file) => {
+        formDataToSend.append("media", file);
+      });
+
       const res = await fetch("/api/bookings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slot: selectedSlot, form: formData }),
+        body: formDataToSend,
       });
 
       const data = await res.json();
@@ -73,6 +110,7 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         return;
       }
 
+      setInvoiceUrl(data.invoiceUrl || null);
       setSuccess(true);
     } catch {
       setError("Gagal menghubungi server. Silakan coba lagi.");
@@ -89,14 +127,28 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
           Booking Berhasil
         </h3>
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted">
-          Kami akan mengirimkan detail pembayaran via WhatsApp ke{" "}
-          <span className="font-medium text-foreground">
-            {formData.phone_number}
-          </span>
+          {invoiceUrl
+            ? "Klik tombol di bawah untuk menyelesaikan pembayaran Rp 750.000."
+            : "Kami akan mengirimkan detail pembayaran via WhatsApp ke "}
+          {!invoiceUrl && (
+            <span className="font-medium text-foreground">
+              {formData.phone_number}
+            </span>
+          )}
         </p>
         <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-secondary px-5 py-2.5 text-sm font-medium text-foreground">
           {selectedSlot?.label}, {selectedSlot?.time} WIB
         </div>
+        {invoiceUrl && (
+          <a
+            href={invoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 w-full rounded-full bg-foreground py-3.5 text-center text-sm font-medium text-white transition-all hover:bg-primary-light hover:shadow-lg"
+          >
+            Bayar Sekarang
+          </a>
+        )}
       </div>
     );
   }
@@ -110,13 +162,13 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         </h3>
       </div>
 
-      {/* Full Name */}
+      {/* Nama */}
       <div>
         <label
           htmlFor="full_name"
           className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
         >
-          Nama Lengkap
+          Nama
         </label>
         <div className="relative">
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
@@ -135,13 +187,13 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         </div>
       </div>
 
-      {/* Phone */}
+      {/* Telp/WA */}
       <div>
         <label
           htmlFor="phone_number"
           className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
         >
-          Nomor WhatsApp
+          Telp/WA
         </label>
         <div className="relative">
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
@@ -169,119 +221,112 @@ export default function BookingForm({ selectedSlot }: BookingFormProps) {
         )}
       </div>
 
-      {/* Two columns: Project Type + Location */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-        <div>
-          <label
-            htmlFor="project_type"
-            className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
-          >
-            Tipe Proyek
-          </label>
-          <div className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <BriefcaseIcon className="h-4 w-4 text-gray-400" />
-            </div>
-            <select
-              id="project_type"
-              name="project_type"
-              value={formData.project_type}
-              onChange={handleChange}
-              className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-8 text-sm text-foreground outline-none transition-all focus:border-foreground focus:ring-1 focus:ring-foreground"
-            >
-              {PROJECT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-              <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <label
-            htmlFor="location"
-            className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
-          >
-            Lokasi Proyek
-          </label>
-          <div className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <MapPinIcon className="h-4 w-4 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              id="location"
-              name="location"
-              required
-              value={formData.location}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-foreground outline-none transition-all placeholder:text-gray-300 focus:border-foreground focus:ring-1 focus:ring-foreground"
-              placeholder="Jakarta Selatan"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Budget */}
+      {/* Email */}
       <div>
         <label
-          htmlFor="budget_range"
+          htmlFor="email"
           className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
         >
-          Estimasi Budget
+          Email
         </label>
         <div className="relative">
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-            <BanknotesIcon className="h-4 w-4 text-gray-400" />
+            <EnvelopeIcon className="h-4 w-4 text-gray-400" />
           </div>
-          <select
-            id="budget_range"
-            name="budget_range"
-            value={formData.budget_range}
+          <input
+            type="email"
+            id="email"
+            name="email"
+            value={formData.email}
             onChange={handleChange}
-            className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-8 text-sm text-foreground outline-none transition-all focus:border-foreground focus:ring-1 focus:ring-foreground"
-          >
-            {BUDGET_RANGES.map((range) => (
-              <option key={range} value={range}>
-                {range}
-              </option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+            className={`w-full rounded-lg border bg-white py-3 pl-10 pr-4 text-sm text-foreground outline-none transition-all placeholder:text-gray-300 focus:ring-1 ${
+              formData.email && !emailValid
+                ? "border-red-300 focus:border-red-400 focus:ring-red-200"
+                : "border-gray-200 focus:border-foreground focus:ring-foreground"
+            }`}
+            placeholder="email@contoh.com"
+          />
         </div>
+        {formData.email && !emailValid && (
+          <p className="mt-1.5 text-xs text-red-400">Format email tidak valid</p>
+        )}
       </div>
 
-      {/* Description */}
+      {/* Problem */}
       <div>
         <label
-          htmlFor="description"
+          htmlFor="problem"
           className="mb-1.5 flex items-center justify-between text-xs font-medium uppercase tracking-wider text-muted"
         >
-          <span>Deskripsi Kebutuhan</span>
+          <span>Problem</span>
           <span className="normal-case tracking-normal">
-            {formData.description.length}/300
+            {formData.problem.length}/500
           </span>
         </label>
         <textarea
-          id="description"
-          name="description"
-          maxLength={300}
-          rows={3}
-          value={formData.description}
+          id="problem"
+          name="problem"
+          required
+          maxLength={500}
+          rows={4}
+          value={formData.problem}
           onChange={handleChange}
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-foreground outline-none transition-all placeholder:text-gray-300 focus:border-foreground focus:ring-1 focus:ring-foreground resize-none"
-          placeholder="Ceritakan singkat tentang proyek Anda (opsional)"
+          className="w-full resize-none rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-foreground outline-none transition-all placeholder:text-gray-300 focus:border-foreground focus:ring-1 focus:ring-foreground"
+          placeholder="Ceritakan masalah atau kebutuhan Anda terkait ruangan/rumah..."
         />
+      </div>
+
+      {/* Foto/Video ruangan/rumah */}
+      <div>
+        <label
+          htmlFor="media"
+          className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted"
+        >
+          Foto/Video ruangan/rumah
+        </label>
+        <div className="space-y-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            id="media"
+            name="media"
+            accept={ACCEPT_TYPES}
+            multiple
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-gray-300 bg-gray-50 py-4 px-4 text-sm text-muted transition-colors hover:border-foreground hover:bg-gray-100"
+          >
+            <CameraIcon className="h-5 w-5 shrink-0" />
+            <span>
+              {mediaFiles.length > 0
+                ? `Tambahkan lagi (${mediaFiles.length}/${MAX_FILES})`
+                : `Pilih foto atau video (max ${MAX_FILES} file, ${MAX_FILE_SIZE_MB}MB/file)`}
+            </span>
+          </button>
+          {mediaFiles.length > 0 && (
+            <ul className="space-y-2">
+              {mediaFiles.map((file, i) => (
+                <li
+                  key={i}
+                  className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                >
+                  <span className="truncate text-foreground">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(i)}
+                    className="shrink-0 text-red-500 hover:text-red-600"
+                  >
+                    Hapus
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {error && (
